@@ -107,6 +107,38 @@ xingo-cold-project/
 2.  Instale a biblioteca: `pip install paho-mqtt`
 3.  Execute: `python mangaba_ai_hub.py`
 
+
+### 🔌 Configurar ESP32 no Wokwi (Passo a Passo)
+
+Para rodar a simulação na nuvem, precisamos configurar o ambiente virtual.
+
+1.  **Crie um novo projeto:**
+    Acesse [Wokwi ESP32 Starter](https://wokwi.com/projects/new/esp32) para abrir um projeto em branco.
+
+2.  **Instale as Bibliotecas (Essencial):**
+    No editor do Wokwi, clique na aba **`Library Manager`** (ou crie um arquivo chamado `libraries.txt` clicando no **+**) e adicione o seguinte conteúdo:
+    ```text
+    PubSubClient
+    ArduinoJson
+    DHT sensor library for ESPx
+    ```
+3.  **Configure o Hardware (`diagram.json`):**
+    Clique na aba `diagram.json` e substitua todo o código pelo conteúdo do arquivo `diagram.json` deste repositório.
+    *Isso montará automaticamente o ESP32, o Sensor DHT22, o Interruptor e o LED.*
+
+4.  **Configure a Rede (`secrets.h`):**
+    Clique no **+** (seta azul ao lado dos arquivos), crie um arquivo chamado `secrets.h` e cole:
+    ```cpp
+    #define SECRET_SSID "Wokwi-GUEST"
+    #define SECRET_PASS ""
+    ```
+
+5.  **Carregue o Código (`main.ino`):**
+    Na aba principal `sketch.ino` (ou `main.ino`), apague tudo e cole o código C++ deste repositório.
+    *Certifique-se de que a linha `mqtt_server` aponta para `"test.mosquitto.org"`.*
+
+6.  **Rodar:**
+    Clique no botão **Play (▶️)** verde.
 -----
 
 ## 📡 Tópicos MQTT

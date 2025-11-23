@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🌡️ Projeto sem nome
+# 🌡️ Mangaba AI
 ### Sistema Inteligente de Gestão Energética
 
 ![Python](https://img.shields.io/badge/Python-3.x-blue?style=for-the-badge&logo=python&logoColor=white)
@@ -19,6 +19,18 @@
 
 ---
 
+## 📁 Estrutura do Projeto
+
+mangaba-ai-project/
+├── 📄 README.md # Este arquivo
+├── 🔧 mangaba_ai_hub.py # Processamento inteligente (Python)
+├── ⚡ main.ino # Código do ESP32 (Wokwi)
+├── 🔌 diagram.json # Diagrama do circuito (Wokwi)
+└── 🛠️ secrets.h # Configurações WiFi (Wokwi)
+
+
+---
+
 ## 🛠️ Componentes e Ferramentas
 
 | Componente | Função |
@@ -27,52 +39,25 @@
 | 📟 **ESP32 (Wokwi)** | Microcontrolador simulado |
 | 📡 **Sensor PIR/IR** | Detecção de movimento/presença |
 | 💡 **LED (Wokwi)** | Simula status do ar condicionado |
-| 🦟 **Mosquitto MQTT** | Broker intermediário de comunicação |
+| 🦟 **MQTT Broker** | Broker público de comunicação |
 | 🐍 **Python 3 + paho** | Processamento inteligente no "Mangaba AI Hub" |
+
+---
+
+## 📡 Tópicos MQTT Configurados
+
+| Tópico | Direção | Função |
+|--------|---------|--------|
+| `mangaba/sala/sensor` | ESP32 → Python | Dados de movimento do sensor |
+| `mangaba/sala/controle` | Python → ESP32 | Comandos do ar condicionado |
+
+> **💡 Importante:** Estes tópicos já estão pré-configurados nos arquivos do projeto.
 
 ---
 
 ## 🚀 Tutorial de Configuração
 
-### 🦟 Passo 1: Configurar o Mosquitto MQTT Broker
-
-O Broker MQTT é o "carteiro" que entrega as mensagens entre o ESP32 e o Python.
-
-**Instalação:**
-
-```bash
-# 🐧 Linux (Debian/Ubuntu)
-sudo apt update
-sudo apt install mosquitto mosquitto-clients
-sudo systemctl enable mosquitto.service
-sudo systemctl start mosquitto.service
-
-# 🍎 macOS (via Homebrew)
-brew install mosquitto
-brew services start mosquitto
-
-# 🪟 Windows: Baixe do site mosquitto.org
-
-
-
-````
-
-**Verificação:**
-Abra dois terminais. No primeiro (para escutar):
-
-```bash
-mosquitto_sub -h localhost -t test/topic -v
-```
-
-No segundo (para enviar):
-
-```bash
-mosquitto_pub -h localhost -t test/topic -m "Hello Mosquitto!"
-```
-
------
-
-### 🧠 Passo 2: Configurar o Mangaba AI Hub
+### 🧠 Passo 1: Configurar o Mangaba AI Hub
 
 Este script simula a inteligência artificial que processa os dados.
 
@@ -82,54 +67,101 @@ Este script simula a inteligência artificial que processa os dados.
     pip install paho-mqtt
     ```
 
-2.  **Configure o IP:**
-    No arquivo `mangaba_ai_hub.py`, altere a linha:
-
-    ```python
-    MQTT_BROKER_HOST = "SEU_IP_DO_NOTEBOOK" # Ex: 192.168.1.15
-    ```
-
-    > ⚠️ **Importante:** Use o comando `ipconfig` (Windows) ou `ifconfig` (Linux/Mac) para descobrir seu IP local.
-
-3.  **Execute o Hub:**
+2.  **Execute o Hub:**
 
     ```bash
     python mangaba_ai_hub.py
     ```
 
+> ⚠️ **Pronto para uso:** O arquivo `mangaba_ai_hub.py` já está configurado com o broker público `test.mosquitto.org`.
+
 -----
 
-### 🔌 Passo 3: Configurar ESP32 no Wokwi
+### 🔌 Passo 2: Configurar ESP32 no Wokwi
 
 1.  Crie um projeto **ESP32** no [Wokwi](https://wokwi.com/).
-2.  Monte o circuito conforme o `diagram.json` (PIR no GPIO 27, LED no GPIO 25).
+2.  Monte o circuito usando o `diagram.json` (PIR no GPIO 27, LED no GPIO 25).
 3.  Copie o código do `main.ino` para o editor.
+4.  Crie uma aba `secrets.h` no Wokwi com:
 
-**Configurações Críticas no Wokwi:**
-
-  * **IP do Broker:** No `main.ino`, atualize a variável `mqtt_server` com o **MESMO IP** usado no Python.
-  * **Secrets:** Crie uma aba `secrets.h` no Wokwi com o seguinte conteúdo (obrigatório para simulação):
     ```cpp
     #define SECRET_SSID "Wokwi-GUEST"
     #define SECRET_PASS ""
     ```
 
+> ⚡ **Pronto para uso:** O `main.ino` já está configurado com o broker público `test.mosquitto.org`.
+
 -----
 
 ## 🔄 Fluxo da Demonstração (Demo Day)
 
-1.  **Start:** Inicie o Mosquitto e rode o script Python (`mangaba_ai_hub.py`).
-2.  **Wokwi:** Inicie a simulação. O ESP32 deve conectar ao WiFi e ao MQTT.
-3.  **Ação:** Clique no sensor PIR no Wokwi (simula movimento).
-4.  **Reação:**
-      * ESP32 envia dados ao Hub.
-      * Hub processa (Temp + Movimento).
-      * Hub envia comando `ON`.
-      * **LED acende** (Ar Condicionado LIGADO).
-5.  **Economia:** Aguarde 15s sem interagir.
-      * Hub detecta inatividade.
-      * Hub envia comando `OFF`.
-      * **LED apaga** (Economia de energia).
+1.  **Start:** Execute o script Python:
+    ```bash
+    python mangaba_ai_hub.py
+    ```
+
+2.  **Wokwi:** Inicie a simulação no Wokwi com os arquivos do repositório.
+
+3.  **Ação:** Clique no **sensor PIR** no Wokwi (simula movimento).
+
+4.  **Reação em Cadeia:**
+    - ✅ ESP32 detecta movimento
+    - ✅ Dados enviados para `mangaba/sala/sensor`
+    - ✅ Python processa (se temperatura > 28°C)
+    - ✅ Comando `ON` enviado para `mangaba/sala/controle`
+    - ✅ **LED acende** (Ar Condicionado LIGADO)
+
+5.  **Economia Automática:**
+    - ⏰ Aguarde 15 segundos sem interagir
+    - ✅ Hub detecta inatividade
+    - ✅ Comando `OFF` enviado
+    - ✅ **LED apaga** (Economia de energia)
+
+-----
+
+## 🎊 Teste Bem-Sucedido!
+
+Quando funcionar corretamente, você verá:
+
+**No Terminal Python:**
+
+🚀 Iniciando Mangaba AI Hub...
+✅ Conectado ao MQTT Broker!
+🚶 Movimento detectado! | 🌡️ Temperatura: 31°C
+🔥 Temperatura ALTA! Ligando ar condicionado...
+💡 Comando ON enviado para o ESP32
+
+
+**No Serial Monitor Wokwi:**
+
+🚀 Iniciando Sistema Mangaba...
+✅ WiFi conectado!
+✅ Conectado ao broker!
+🚶 MOVIMENTO DETECTADO! Enviando para o Hub...
+💡 AR CONDICIONADO LIGADO
+
+**E o LED vermelho no Wokwi acenderá!** 🎉
+
+-----
+
+## 🚨 Solução de Problemas
+
+### ❌ "Conexão MQTT falhou"
+- Verifique se está usando `test.mosquitto.org` em ambos os códigos
+- Execute o Python primeiro, depois inicie a simulação Wokwi
+
+### ❌ "LED não acende"
+- Clique no sensor PIR no Wokwi (mude o estado)
+- Verifique o Serial Monitor no Wokwi para ver as mensagens
+
+### ❌ "Nenhuma mensagem no Python"
+- Confirme que os tópicos são exatamente `mangaba/sala/sensor` e `mangaba/sala/controle`
+
+### ✅ Sequência Correta:
+1. Execute `python mangaba_ai_hub.py`
+2. Inicie simulação no Wokwi
+3. Clique no sensor PIR
+4. Observe o LED acender após 2-3 segundos
 
 -----
 
@@ -140,13 +172,14 @@ Este script simula a inteligência artificial que processa os dados.
 | **Detecção de movimento** | ✅ Funcional | Sensor PIR simulado |
 | **Processamento IA** | ✅ Básico | Lógica de temperatura + movimento |
 | **Controle remoto** | ✅ Funcional | LED como simulador de AC |
-| **Comunicação MQTT** | ✅ Estável | Broker local Mosquitto |
+| **Comunicação MQTT** | ✅ Estável | Broker público Mosquitto |
+| **Economia de energia** | ✅ Automática | Desliga após 15s inatividade |
 
 -----
 
 ## 📈 Próximas Evoluções
 
-\<div align="left"\>
+<div align="left">
 
 **🛠️ Expansões técnicas**
 
@@ -162,7 +195,7 @@ Este script simula a inteligência artificial que processa os dados.
   - [ ] Serviços de analytics preditivo
   - [ ] Integração com sistemas BMS existentes
 
-\</div\>
+</div>
 
 -----
 
@@ -209,6 +242,3 @@ Distribuído sob licença **MIT**. Veja `LICENSE` para mais informações.
 [📚 Documentação Wokwi](https://docs.wokwi.com/) • [🦟 Mosquitto MQTT](https://mosquitto.org/) • [🐍 Paho-MQTT](https://pypi.org/project/paho-mqtt/)
 
 </div>
-
-```
-```

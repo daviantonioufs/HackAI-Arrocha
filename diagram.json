@@ -5,15 +5,21 @@
   "parts": [
     { "type": "wokwi-esp32", "id": "esp32", "top": 0, "left": 0, "attrs": {} },
     { "type": "wokwi-pir", "id": "pir", "top": 0, "left": 300, "attrs": {} },
-    { "type": "wokwi-led", "id": "led", "top": 200, "left": 300, "attrs": { "color": "red" } },
-    { "type": "wokwi-resistor", "id": "r1", "top": 200, "left": 400, "attrs": { "value": "220" } }
+    { "type": "wokwi-pushbutton", "id": "ir", "top": 100, "left": 300, "attrs": { "color": "orange" } },
+    { "type": "wokwi-pushbutton", "id": "mmwave", "top": 200, "left": 300, "attrs": { "color": "blue" } },
+    { "type": "wokwi-led", "id": "led", "top": 300, "left": 300, "attrs": { "color": "red" } },
+    { "type": "wokwi-resistor", "id": "r1", "top": 300, "left": 400, "attrs": { "value": "220" } }
   ],
   "connections": [
     [ "pir:VCC", "esp32:3V3", "red", [ "v0" ] ],
     [ "pir:GND", "esp32:GND", "black", [ "v1" ] ],
     [ "pir:OUT", "esp32:27", "green", [ "v2" ] ],
-    [ "led:A", "esp32:25", "blue", [ "v3" ] ],
-    [ "led:C", "r1:1", "yellow", [ "v4" ] ],
-    [ "r1:2", "esp32:GND", "black", [ "v5" ] ]
+    [ "ir:1.l", "esp32:26", "orange", [ "v3" ] ],
+    [ "ir:2.l", "esp32:3V3", "red", [ "v4" ] ],
+    [ "mmwave:1.l", "esp32:14", "blue", [ "v5" ] ],
+    [ "mmwave:2.l", "esp32:3V3", "red", [ "v6" ] ],
+    [ "led:A", "esp32:25", "blue", [ "v7" ] ],
+    [ "led:C", "r1:1", "yellow", [ "v8" ] ],
+    [ "r1:2", "esp32:GND", "black", [ "v9" ] ]
   ]
 }

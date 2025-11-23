@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🌡️ Mangaba AI
+# 🌡️ Em busca de uma UFS automática
 ### Sistema Inteligente de Gestão Energética
 
 ![Python](https://img.shields.io/badge/Python-3.x-blue?style=for-the-badge&logo=python&logoColor=white)
@@ -219,7 +219,7 @@ Quando funcionar corretamente, você verá:
 
 ## 🤝 Como Contribuir
 
-Quer ajudar a melhorar o Mangaba AI? Siga os passos:
+Quer ajudar a melhorar o Em busca da UFS automática? Siga os passos:
 
 1.  🍴 Faça um **fork** do projeto
 2.  🌿 Crie uma **branch** para sua feature (`git checkout -b feature/AmazingFeature`)

@@ -127,7 +127,7 @@ Para rodar a simulação na nuvem, precisamos configurar o ambiente virtual.
     *Isso montará automaticamente o ESP32, o Sensor DHT22, o Interruptor e o LED.*
 
 4.  **Configure a Rede (`secrets.h`):**
-    Clique no **+** (seta azul ao lado dos arquivos), crie um arquivo chamado `secrets.h` e cole:
+    Clique na **▾** (seta ao lado de "Library Manager"), crie um novo arquivo chamado `secrets.h` e cole:
     ```cpp
     #define SECRET_SSID "Wokwi-GUEST"
     #define SECRET_PASS ""

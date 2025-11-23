@@ -1,25 +1,25 @@
 {
   "version": 1,
-  "author": "Mangaba AI",
+  "author": "Mangaba Team",
   "editor": "wokwi",
   "parts": [
-    { "type": "wokwi-esp32", "id": "esp32", "top": 0, "left": 0, "attrs": {} },
-    { "type": "wokwi-pir", "id": "pir", "top": 0, "left": 300, "attrs": {} },
-    { "type": "wokwi-pushbutton", "id": "ir", "top": 100, "left": 300, "attrs": { "color": "orange" } },
-    { "type": "wokwi-pushbutton", "id": "mmwave", "top": 200, "left": 300, "attrs": { "color": "blue" } },
-    { "type": "wokwi-led", "id": "led", "top": 300, "left": 300, "attrs": { "color": "red" } },
-    { "type": "wokwi-resistor", "id": "r1", "top": 300, "left": 400, "attrs": { "value": "220" } }
+    { "type": "board-esp32-devkit-c", "id": "esp", "top": 0, "left": 0, "attrs": {} },
+    { "type": "wokwi-dht22", "id": "dht1", "top": -80, "left": 120, "attrs": {} },
+    { "type": "wokwi-slide-switch", "id": "sw1", "top": 120, "left": 150, "attrs": {} },
+    { "type": "wokwi-led", "id": "led1", "top": 50, "left": 150, "attrs": { "color": "green" } },
+    { "type": "wokwi-resistor", "id": "r1", "top": 100, "left": 200, "attrs": { "value": "220" } }
   ],
   "connections": [
-    [ "pir:VCC", "esp32:3V3", "red", [ "v0" ] ],
-    [ "pir:GND", "esp32:GND", "black", [ "v1" ] ],
-    [ "pir:OUT", "esp32:27", "green", [ "v2" ] ],
-    [ "ir:1.l", "esp32:26", "orange", [ "v3" ] ],
-    [ "ir:2.l", "esp32:3V3", "red", [ "v4" ] ],
-    [ "mmwave:1.l", "esp32:14", "blue", [ "v5" ] ],
-    [ "mmwave:2.l", "esp32:3V3", "red", [ "v6" ] ],
-    [ "led:A", "esp32:25", "blue", [ "v7" ] ],
-    [ "led:C", "r1:1", "yellow", [ "v8" ] ],
-    [ "r1:2", "esp32:GND", "black", [ "v9" ] ]
+    [ "esp:TX0", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX0", "$serialMonitor:TX", "", [] ],
+    [ "dht1:VCC", "esp:3V3", "red", [ "v0" ] ],
+    [ "dht1:SDA", "esp:15", "blue", [ "v0" ] ],
+    [ "dht1:GND", "esp:GND.1", "black", [ "v0" ] ],
+    [ "sw1:1", "esp:GND.2", "black", [ "v0" ] ],
+    [ "sw1:2", "esp:27", "green", [ "v0" ] ],
+    [ "sw1:3", "esp:3V3", "red", [ "v0" ] ],
+    [ "led1:A", "esp:25", "green", [ "v0" ] ],
+    [ "led1:C", "r1:1", "green", [ "v0" ] ],
+    [ "r1:2", "esp:GND.1", "black", [ "v0" ] ]
   ]
 }

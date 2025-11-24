@@ -1,163 +1,210 @@
-/*
- * FIRMWARE CORRIGIDO: Mangaba-Xingo Sensor Node
- * PLATAFORMA: ESP32 (Ambiente Wokwi)
- * AUTOR: Equipe Arabian Nights (Hustler & Hackers)
- */
-
 #include <WiFi.h>
 #include <PubSubClient.h>
-#include <ArduinoJson.h>
-#include "DHTesp.h" // Biblioteca específica para ESP32 no Wokwi
+#include <DHT.h> 
+#include <DHT_U.h> 
 
-// --- CREDENCIAIS DO SIMULADOR (Não altere isso no Wokwi) ---
-const char* SSID_NAME = "Wokwi-GUEST"; 
-const char* SSID_PASS = "";
+// ******************************************************
+// --- 1. CONFIGURAÇÕES DE REDE E MQTT ---
+// ******************************************************
+const char* ssid = "Wokwi-GUEST";          // <<<<< SUBSTITUA
+const char* password = "";     // <<<<< SUBSTITUA
 
-// --- CONFIGURAÇÃO MQTT ---
-const char* mqtt_server = "test.mosquitto.org";
-const char* topic_sensor = "mangaba/sala/sensor";
-const char* topic_control = "mangaba/sala/controle";
+const char* mqtt_server = "test.mosquitto.org"; 
+const int mqtt_port = 1883;                            
+const char* mqtt_client_id = "ESP32_Automação_Final";
 
-// --- PINAGEM (Hardware) ---
-#define DHT_PIN 32    // Pino blindado (logicamente no simulador)
-#define PIR_PIN 27    // Sensor de Presença
-#define AC_LED_PIN 25 // Atuador (Lâmpada/LED)
+// --- TÓPICOS ---
+const char* topic_temp = "esp32/data/temperatura"; 
+const char* topic_hum = "esp32/data/umidade"; 
+const char* topic_motion = "esp32/alerta/movimento"; 
+const char* topic_status = "esp32/status";
+const char* topic_alerta_duplo = "esp32/alerta/risco_temp_movimento"; 
 
-// --- OBJETOS GLOBAIS ---
-DHTesp dht; 
+// Tópicos de Assinatura (Comandos)
+const char* topic_subscribe_comando = "esp32/comando/#"; 
+const char* topic_comando_alerta = "esp32/comando/acao_alerta"; 
+
+// ******************************************************
+// --- 2. CONFIGURAÇÕES DOS SENSORES E PINOS ---
+// ******************************************************
+#define DHTPIN 4       // Pino GPIO para o DHT22
+#define DHTTYPE DHT22  
+#define PIRPIN 5       // Pino GPIO para o PIR
+#define LEDPIN 2       // Pino GPIO para LED de teste (onboard)
+
+// --- CONFIGURAÇÕES DE LIMITE ---
+const float TEMP_MAXIMA = 30.0; // Limite de temperatura em Celsius
+
+// ******************************************************
+// --- 3. VARIÁVEIS E OBJETOS ---
+// ******************************************************
 WiFiClient espClient;
 PubSubClient client(espClient);
-unsigned long lastMsg = 0;
+DHT dht(DHTPIN, DHTTYPE); 
 
-// --- SETUP DO WIFI ---
+// Variáveis de Controle
+long lastDHTRead = 0;
+const long DHT_INTERVAL = 10000; // Publica DHT a cada 10 segundos
+int pirState = LOW; 
+bool alertaAtivo = false; 
+char msgBuffer[50]; 
+
+// ******************************************************
+// --- 4. FUNÇÕES DE REDE E MQTT ---
+// ******************************************************
+
 void setup_wifi() {
   delay(10);
-  Serial.println("--------------------------------");
-  Serial.print("📡 Iniciando: Conectando a ");
-  Serial.println(SSID_NAME);
-  
-  WiFi.mode(WIFI_STA); 
-  WiFi.begin(SSID_NAME, SSID_PASS);
+  Serial.println();
+  Serial.print("Conectando a ");
+  Serial.println(ssid);
 
-  // Lógica de Timeout para não travar o boot eternamente
-  unsigned long startAttemptTime = millis();
-  
+  WiFi.begin(ssid, password);
+
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
-    // Se demorar mais de 10s, tenta reiniciar a busca
-    if (millis() - startAttemptTime > 10000) {
-        Serial.println("\n❌ Timeout no WiFi. Tentando novamente...");
-        WiFi.begin(SSID_NAME, SSID_PASS);
-        startAttemptTime = millis();
-    }
   }
-  
-  Serial.println("\n✅ WiFi Conectado!");
-  Serial.print("📍 IP Address: ");
+
+  Serial.println("\nWiFi conectado!");
+  Serial.print("Endereço IP: ");
   Serial.println(WiFi.localIP());
-  Serial.println("--------------------------------");
 }
 
-// --- RECEBIMENTO DE MENSAGEM (CALLBACK) ---
-void callback(char* topic, byte* payload, unsigned int length) {
-  Serial.print("📩 Mensagem recebida: ");
-  
-  String msg = "";
-  for (int i = 0; i < length; i++) {
-    msg += (char)payload[i];
-  }
-  Serial.println(msg);
-
-  // Controle de Atuadores
-  if (msg == "ON") {
-    digitalWrite(AC_LED_PIN, HIGH);
-    Serial.println("💡 Luz LIGADA");
-  } 
-  else if (msg == "OFF") {
-    digitalWrite(AC_LED_PIN, LOW);
-    Serial.println("💡 Luz DESLIGADA");
-  }
-}
-
-// --- RECONEXÃO MQTT ROBUSTA ---
 void reconnect() {
-  // Tenta conectar, mas se falhar, NÃO trava o loop principal
-  if (!client.connected()) {
-    Serial.print("🔌 Tentando MQTT... ");
-    
-    // ID Único para evitar colisão com outros grupos usando o mesmo servidor
-    String clientId = "Mangaba-Node-";
-    clientId += String(random(0xffff), HEX);
-    
-    if (client.connect(clientId.c_str())) {
-      Serial.println("✅ Conectado!");
-      client.subscribe(topic_control);
+  while (!client.connected()) {
+    Serial.print("Tentando conectar ao MQTT...");
+    if (client.connect(mqtt_client_id)) { 
+      Serial.println("conectado!");
+      
+      client.subscribe(topic_subscribe_comando); 
+      client.subscribe(topic_comando_alerta);    
+      
+      Serial.println("Inscrito nos tópicos de Comando e Ação de Alerta.");
+      client.publish(topic_status, "Online"); 
     } else {
-      Serial.print("❌ Falha, rc=");
+      Serial.print("falhou, rc=");
       Serial.print(client.state());
-      Serial.println(" (tentará novamente no próximo ciclo)");
-      // Não usamos delay() aqui para não travar o sensor
+      Serial.println(" tentando novamente em 5 segundos");
+      delay(5000);
     }
   }
 }
 
-// --- SETUP PRINCIPAL ---
+// --- Função de Callback (Receptor de Mensagens) ---
+void callback(char* topic, byte* payload, unsigned int length) {
+  Serial.print(">>> Mensagem recebida no tópico: ");
+  Serial.println(topic);
+
+  String messageTemp;
+  for (int i = 0; i < length; i++) {
+    messageTemp += (char)payload[i];
+  }
+  
+  // 1. Lógica do Alerta Duplo (Resposta do Broker: LIGAR/DESLIGAR LED)
+  if (String(topic) == topic_comando_alerta) {
+    if (messageTemp == "LIGAR_LED_ALERTA") {
+      digitalWrite(LEDPIN, HIGH);
+      Serial.println(">>> ORDEM RECEBIDA: Ligar LED de Alerta!");
+      client.publish(topic_status, "LED_ALERTA_LIGADO_PELO_BROKER");
+    } else if (messageTemp == "DESLIGAR_LED_ALERTA") {
+      digitalWrite(LEDPIN, LOW);
+      Serial.println(">>> ORDEM RECEBIDA: Desligar LED de Alerta.");
+      client.publish(topic_status, "LED_ALERTA_DESLIGADO");
+    }
+  }
+  // 2. Lógica de Comandos Genéricos (LED e Reboot)
+  else if (String(topic) == "esp32/comando/led") {
+    if (messageTemp == "ligar") {
+      digitalWrite(LEDPIN, HIGH);
+      client.publish(topic_status, "LED_Ligado");
+    } else if (messageTemp == "desligar") {
+      digitalWrite(LEDPIN, LOW);
+      client.publish(topic_status, "LED_Desligado");
+    }
+  } 
+  else if (String(topic) == "esp32/comando/reboot") {
+    Serial.println(">>> Comando de Reboot recebido. Reiniciando...");
+    client.publish(topic_status, "Reiniciando");
+    delay(100); 
+    ESP.restart();
+  }
+}
+
+// ******************************************************
+// --- 5. SETUP E LOOP (Funções Principais) ---
+// ******************************************************
+
 void setup() {
   Serial.begin(115200);
-  
-  pinMode(PIR_PIN, INPUT); // PIR geralmente não precisa de Pullup interno se for módulo
-  pinMode(AC_LED_PIN, OUTPUT);
-  
-  // Inicialização específica da biblioteca DHTesp
-  dht.setup(DHT_PIN, DHTesp::DHT22);
-  Serial.println("⏳ Sensor DHT (ESPx) inicializado no Pino 32");
-  
+
+  // Inicialização de Pinos e Sensores
+  dht.begin();
+  pinMode(PIRPIN, INPUT);
+  pinMode(LEDPIN, OUTPUT);
+  digitalWrite(LEDPIN, LOW); 
+
+  // Inicialização de Rede e MQTT
   setup_wifi();
-  client.setServer(mqtt_server, 1883);
+  client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
 }
 
-// --- LOOP PRINCIPAL ---
 void loop() {
-  // Verifica conexão MQTT (non-blocking)
+  // 1. Manter Conexão MQTT
   if (!client.connected()) {
     reconnect();
   }
-  client.loop();
+  client.loop(); // *Ouvinte ativo para receber comandos*
 
-  // Timer não-bloqueante (executa a cada 3 segundos)
-  unsigned long now = millis();
-  if (now - lastMsg > 3000) { 
-    lastMsg = now;
+  // --- Lógica de Publicação dos Sensores ---
+  long now = millis();
+  
+  // Leitura das variáveis DHT (assumindo que já foram lidas ou serão lidas agora)
+  float t = dht.readTemperature();
+  float h = dht.readHumidity();
 
-    // Leitura dos Sensores
-    TempAndHumidity data = dht.getTempAndHumidity();
-    bool movement = digitalRead(PIR_PIN); 
-
-    // Validação de erro do sensor
-    if (dht.getStatus() != 0) {
-      Serial.println("⚠️ Erro de Leitura DHT: " + String(dht.getStatusString()));
-      return; 
-    }
-
-    // Criação do JSON
-    StaticJsonDocument<256> doc; 
-    doc["movement"] = movement;
-    doc["temperature"] = data.temperature;
-    doc["humidity"] = data.humidity;
+  // 2. Publicação Temporizada do DHT
+  if (now - lastDHTRead >= DHT_INTERVAL) { 
+    lastDHTRead = now;
     
-    char buffer[256];
-    serializeJson(doc, buffer);
-    
-    // Envio
-    if (client.connected()) {
-        if (client.publish(topic_sensor, buffer)) {
-            Serial.print("📤 Telemetry Sent: ");
-            Serial.println(buffer);
-        } else {
-            Serial.println("❌ Falha no envio MQTT");
-        }
+    if (isnan(h) || isnan(t)) {
+      client.publish(topic_status, "Erro_DHT");
+    } else {
+      snprintf(msgBuffer, sizeof(msgBuffer), "%.2f", t);
+      client.publish(topic_temp, msgBuffer);
+      snprintf(msgBuffer, sizeof(msgBuffer), "%.2f", h);
+      client.publish(topic_hum, msgBuffer);
     }
   }
+
+  // 3. Lógica de Alerta Duplo (PIR + Temperatura)
+  int val = digitalRead(PIRPIN);
+  
+  if (val == HIGH) { // Movimento detectado
+    if (pirState == LOW) {
+      pirState = HIGH; 
+      
+      // >>> VERIFICAÇÃO DE ALERTA DUPLO <<<
+      if (t > TEMP_MAXIMA && alertaAtivo == false) {
+          Serial.println(">>> ALERTA DUPLO DISPARADO! Enviando Risco ao Broker.");
+          
+          snprintf(msgBuffer, sizeof(msgBuffer), "RISCO_TEMP_MOVIMENTO_T:%.1f", t);
+          client.publish(topic_alerta_duplo, msgBuffer); // Envia o alerta
+          
+          alertaAtivo = true; // Impede envio repetido
+      } else {
+          client.publish(topic_motion, "DETECTADO");
+      }
+    }
+  } else { // Sem Movimento
+    if (pirState == HIGH) {
+      pirState = LOW; 
+      alertaAtivo = false; // Reseta o flag
+      
+      client.publish(topic_motion, "FINALIZADO");
+    }
+  }
+
+  delay(10); 
 }

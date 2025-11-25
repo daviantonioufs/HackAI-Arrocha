@@ -1,197 +1,124 @@
-#include <DHT.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include "DHTesp.h"
 
-// ---------------------------------------------------------------------
-// PINOS
-// ---------------------------------------------------------------------
-int ledporta = 25;
-int pirporta = 22;
-int dhtporta = 4;
+// ===========================
+// CONFIGURAÇÕES DO HARDWARE
+// ===========================
+#define DHT_PIN 32
+#define PIR_PIN 27
+#define LED_PIN 25
 
-// ---------------------------------------------------------------------
-// ESTADOS
-// ---------------------------------------------------------------------
-bool arLigado = false;       // Estado real do ar
-bool pareceLigado = false;   // Deduções pela temperatura/umidade
+DHTesp dht;
 
-unsigned long momentoUltimoMovimento = 0;  
-unsigned long tempoSemMovimento = 0;       
+// ===========================
+// CONFIG WI-FI
+// ===========================
+const char* SSID_NAME = "Wokwi-GUEST";
+const char* SSID_PASS = "";
 
-#define DHTTYPE DHT22
-DHT dht(dhtporta, DHTTYPE);
+// ===========================
+// URL DO BACKEND
+// ===========================
+String backendUrl = "http://SEU_BACKEND_BASE44/process";
 
-// tempo antes de desligar o ar (1 minuto)
-const unsigned long TEMPO_DESLIGAR = 60000;
+// ===========================
+// FUNÇÃO: Conecta WiFi
+// ===========================
+void connectWiFi() {
+  WiFi.begin(SSID_NAME, SSID_PASS);
+  Serial.print("Conectando ao WiFi");
 
-
-// =====================================================================
-// IA (somente documentada)
-// =====================================================================
-/*
-    A IA teria entradas:
-      [temperatura, umidade, movimento, arLigado,
-       pareceLigado, tempoSemMovimento]
-
-    E retornaria:
-      prob_ar_ligado
-      prob_deveria_ligar
-      prob_erro_termico
-
-    EXEMPLO (não usado agora):
-        ml.predict(input, output);
-*/
-// =====================================================================
-
-
-// =====================================================================
-// Deduz estado térmico
-// =====================================================================
-bool deduzirEstadoFisico(float temp, float umid) {
-  float limiteTemp = 24.0;
-  float limiteUmid = 60.0;
-
-  return (temp < limiteTemp && umid < limiteUmid);
-}
-
-
-
-// =====================================================================
-// LED -> sinal IR universal
-// =====================================================================
-void enviarSinal() {
-  digitalWrite(ledporta, HIGH);
-  delay(250);
-  digitalWrite(ledporta, LOW);
-}
-
-
-
-// =====================================================================
-// Liga e desliga
-// =====================================================================
-void ligarAr() {
-  if (!arLigado) {
-    arLigado = true;
-    momentoUltimoMovimento = millis(); // zera contagem ao ligar
-    tempoSemMovimento = 0;
-
-    enviarSinal();
-    Serial.println("[AR] LIGADO ✔ (Presença + Sala quente)");
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    delay(300);
   }
+
+  Serial.println("\nWiFi conectado!");
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP());
 }
 
-void desligarAr() {
-  if (arLigado) {
-    arLigado = false;
-    tempoSemMovimento = 0; // zera ao desligar
-
-    enviarSinal();
-    Serial.println("[AR] DESLIGADO ✔ (1 min sem movimento + Sala fria)");
+// ===========================
+// FUNÇÃO: Envia os dados ao backend
+// ===========================
+void enviarParaBackend(float temp, float umidade, bool presenca) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi desconectado. Reconnecting...");
+    connectWiFi();
   }
+
+  HTTPClient http;
+  http.begin(backendUrl);
+  http.addHeader("Content-Type", "application/json");
+
+  // Monta JSON
+  DynamicJsonDocument doc(256);
+  doc["modelo_id"] = "AC_01";
+  doc["temp_amb"] = temp;
+  doc["umidade"] = umidade;
+  doc["tempo_uso_horas"] = 1.2;
+  doc["temp_alvo"] = 23.0;
+  doc["presenca_detectada"] = presenca;
+
+  String json;
+  serializeJson(doc, json);
+
+  Serial.println("\n📤 Enviando JSON:");
+  Serial.println(json);
+
+  // Envia requisição
+  int httpCode = http.POST(json);
+
+  if (httpCode > 0) {
+    Serial.printf("📥 Resposta HTTP: %d\n", httpCode);
+
+    String resposta = http.getString();
+    Serial.println("Resposta do backend:");
+    Serial.println(resposta);
+
+    // ===========================
+    // LED: CONFIRMAÇÃO DE COMANDO
+    // ===========================
+    digitalWrite(LED_PIN, HIGH);
+    delay(1000);
+    digitalWrite(LED_PIN, LOW);
+  }
+  else {
+    Serial.printf("❌ Erro ao enviar: %s\n", http.errorToString(httpCode).c_str());
+  }
+
+  http.end();
 }
 
-
-
-// =====================================================================
-// Setup
-// =====================================================================
+// ===========================
+// CONFIGURAÇÕES INICIAIS
+// ===========================
 void setup() {
   Serial.begin(115200);
-  pinMode(ledporta, OUTPUT);
-  pinMode(pirporta, INPUT);
-  dht.begin();
+
+  dht.setup(DHT_PIN, DHTesp::DHT22);
+  pinMode(PIR_PIN, INPUT);
+  pinMode(LED_PIN, OUTPUT);
+
+  connectWiFi();
 }
 
-
-
-// =====================================================================
-// Loop principal
-// =====================================================================
+// ===========================
+// LOOP PRINCIPAL
+// ===========================
 void loop() {
+  TempAndHumidity data = dht.getTempAndHumidity();
+  bool presenca = digitalRead(PIR_PIN);
 
-  int movimento = digitalRead(pirporta);
-  unsigned long agora = millis();
+  Serial.println("==============================");
+  Serial.println("📡 LEITURAS DO SENSOR");
+  Serial.printf("Temperatura: %.2f °C\n", data.temperature);
+  Serial.printf("Umidade: %.2f %%\n", data.humidity);
+  Serial.printf("Movimento: %s\n", presenca ? "SIM" : "NÃO");
 
-  static int contador = 0;
-  contador++;
+  enviarParaBackend(data.temperature, data.humidity, presenca);
 
-  // leitura do DHT a cada ~2 segundos
-  if (contador > 20) {
-
-    float temp = dht.readTemperature();
-    float umid = dht.readHumidity();
-    contador = 0;
-
-    if (!isnan(temp) && !isnan(umid)) {
-
-      pareceLigado = deduzirEstadoFisico(temp, umid);
-      bool salaFria = pareceLigado;
-      bool salaQuente = !pareceLigado;
-
-      // =======================================================
-      //  CONTAGEM DE TEMPO SEM MOVIMENTO
-      //  (somente quando o AR está ligado)
-      // =======================================================
-      if (arLigado) {
-
-        if (movimento) {
-          momentoUltimoMovimento = agora;  // reseta quando detecta movimento
-        }
-
-        tempoSemMovimento = agora - momentoUltimoMovimento;
-      } 
-      else {
-        tempoSemMovimento = 0;             // ZERA quando o ar está desligado
-      }
-
-
-      // =======================================================
-      //  LIGAMENTO
-      // =======================================================
-      if (!arLigado) {
-        if (movimento && salaQuente) {
-          ligarAr();
-        }
-      }
-
-      // =======================================================
-      //  DESLIGAMENTO
-      // =======================================================
-      if (arLigado) {
-        if (tempoSemMovimento > TEMPO_DESLIGAR && salaFria) {
-          desligarAr();
-        }
-      }
-
-
-      // =======================================================
-      // Serial debug
-      // =======================================================
-      Serial.println("\n--------- SISTEMA ----------");
-
-      Serial.print("Temperatura: ");
-      Serial.print(temp);
-      Serial.println(" C");
-
-      Serial.print("Umidade: ");
-      Serial.print(umid);
-      Serial.println(" %");
-
-      Serial.print("Presença: ");
-      Serial.println(movimento ? "SIM" : "NÃO");
-
-      Serial.print("Estado físico: ");
-      Serial.println(pareceLigado ? "FRIO (parece ligado)" : "QUENTE (parece desligado)");
-
-      Serial.print("Estado lógico: ");
-      Serial.println(arLigado ? "AR LIGADO" : "AR DESLIGADO");
-
-      Serial.print("Tempo sem movimento: ");
-      Serial.print(tempoSemMovimento / 1000);
-      Serial.println("s");
-
-      Serial.println("-----------------------------");
-    }
-  }
-
-  delay(100);
+  delay(4000);
 }

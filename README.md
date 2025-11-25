@@ -13,7 +13,8 @@ O **Arabian Nights** utiliza Inteligência Artificial para realizar o desejo de 
 Acesse nosso Dashboard interativo para visualizar a experiência do usuário final. Aqui apresentamos os dados de consumo, status do ambiente e as decisões tomadas pela IA.
 
 👉 **[ACESSE O DASHBOARD (BASE44)](https://arabian-nights-climate-control-431d16b9.base44.app)**
-👉 **[ACESSE O SLIDE]([https://arabian-nights-climate-control-431d16b9.base44.app](https://drive.google.com/file/d/1TT7j5H6PzuLajt1SgmPmfDLFlN464iFI/view?usp=sharing))**
+
+👉 **[ACESSE O SLIDE](https://drive.google.com/file/d/1TT7j5H6PzuLajt1SgmPmfDLFlN464iFI/view?usp=sharing)**
 
 -----
 

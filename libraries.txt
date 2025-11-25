@@ -4,3 +4,6 @@
 DHT sensor library for ESPx
 EloquentTinyML@0.0.10
 DHT sensor library
+
+
+//acima são as bibliotecas usadas no codigo que emula o esp32 no wowki

@@ -1,245 +1,186 @@
-#include <WiFi.h>
-#include <PubSubClient.h>
 #include <DHT.h>
-#include <DHT_U.h>
 
-// ===============================
-// CONFIGURAÇÕES REDE / MQTT
-// ===============================
-const char* ssid = "Wokwi-GUEST";
-const char* password = "";
+// ---------------------------------------------------------------------
+// PINOS
+// ---------------------------------------------------------------------
+int ledporta = 25;    // LED que envia o sinal para o ar-condicionado
+int pirporta = 22;    // Sensor PIR
+int dhtporta = 4;     // DHT22
 
-const char* mqtt_server = "broker.hivemq.com";
-const int mqtt_port = 1883;
-const char* mqtt_client_id = "ESP32_Automacao_Final";
+// ---------------------------------------------------------------------
+// ESTADOS
+// ---------------------------------------------------------------------
+bool arLigado = false;       // Estado real do ar
+bool pareceLigado = false;   // Deduções pela temperatura/umidade
 
-// Tópicos MQTT
-const char* topic_temp = "esp32/data/temperatura";
-const char* topic_hum = "esp32/data/umidade";
-const char* topic_motion = "esp32/alerta/movimento";
-const char* topic_status = "esp32/status";
-const char* topic_alerta_duplo = "esp32/alerta/risco_temp_movimento";
+unsigned long momentoUltimoMovimento = 0;
 
-// ===============================
-// SENSOR / PINOS
-// ===============================
-#define DHTPIN 21
 #define DHTTYPE DHT22
-#define PIRPIN 18
-#define LEDPIN 4
+DHT dht(dhtporta, DHTTYPE);
 
-// Limites
-const float TEMP_MAXIMA = 30.0;
-const float TEMP_HYSTERESIS = 0.8;
-const unsigned long DHT_INTERVAL = 10000UL;
-const unsigned long PIR_DEBOUNCE_MS = 200UL;
-const unsigned long SEM_MOVIMENTO_DESLIGA = 60000UL;  // 1 minuto sem movimento
+// tempo antes de desligar o ar (1 minuto)
+const unsigned long TEMPO_DESLIGAR = 60000;
 
-// ===============================
-// OBJETOS / VARIÁVEIS
-// ===============================
-WiFiClient espClient;
-PubSubClient client(espClient);
-DHT dht(DHTPIN, DHTTYPE);
 
-unsigned long lastDHTRead = 0;
-unsigned long ultimoMovimento = 0;
+// =====================================================================
+//   IA (APENAS COMENTÁRIOS — NÃO ALTERA O CÓDIGO)
+// =====================================================================
+/*
+    A IA observaria:
+        temperatura, umidade, movimento,
+        arLigado, pareceLigado, tempoSemMovimento
 
-bool alertaDuplo = false;
-bool arLigado = false;
+    E retornaria:
+        [0] prob_ar_ligado
+        [1] prob_deveria_ligar
+        [2] prob_erro_termico
 
-int pirStableState = LOW;
-unsigned long pirLastChange = 0;
+    Exemplo de consulta (não ativo agora):
+        float entrada[6] = {...};
+        float saida[3];
+        ml.predict(entrada, saida);
 
-char msgBuffer[64];
+        if (!arLigado && saida[1] > 0.8) ligarAr();
+        if (saida[2] > 0.7) alertaErro();
+*/
+// =====================================================================
 
-// ===============================
-// FUNÇÕES ÚTEIS
-// ===============================
-void piscarLED() {
-  digitalWrite(LEDPIN, HIGH);
-  delay(200);
-  digitalWrite(LEDPIN, LOW);
-  delay(200);
+
+
+// =====================================================================
+//   Deduz se a sala está fria (ou seja, ar "parece" ligado)
+// =====================================================================
+bool deduzirEstadoFisico(float temp, float umid) {
+  float limiteTemp = 24.0;
+  float limiteUmid = 60.0;
+
+  return (temp < limiteTemp && umid < limiteUmid);
 }
 
+
+
+// =====================================================================
+//   Sinal enviado ao ar (pisca o LED)
+// =====================================================================
+void enviarSinal() {
+  digitalWrite(ledporta, HIGH);
+  delay(250);
+  digitalWrite(ledporta, LOW);
+}
+
+
+
+// =====================================================================
+//   Ligar e desligar o ar
+// =====================================================================
 void ligarAr() {
   if (!arLigado) {
-    piscarLED();
     arLigado = true;
-    client.publish(topic_status, "AR_LIGADO");
-    Serial.println(">>> AR LIGADO <<<");
+    enviarSinal();
+    Serial.println("[AR] LIGADO ✔ (Presença + Sala quente)");
   }
 }
 
 void desligarAr() {
   if (arLigado) {
-    piscarLED();
     arLigado = false;
-    client.publish(topic_status, "AR_DESLIGADO");
-    Serial.println(">>> AR DESLIGADO <<<");
+    enviarSinal();
+    Serial.println("[AR] DESLIGADO ✔ (1 min sem movimento + Sala fria)");
   }
 }
 
-// ===============================
-// WIFI
-// ===============================
-void setup_wifi() {
-  delay(10);
-  Serial.println();
-  Serial.print("Conectando ao WiFi: ");
-  Serial.println(ssid);
 
-  WiFi.begin(ssid, password);
 
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-
-  Serial.println("\nWiFi conectado!");
-  Serial.print("IP: ");
-  Serial.println(WiFi.localIP());
-}
-
-// ===============================
-// MQTT CALLBACK
-// ===============================
-void callback(char* topic, byte* payload, unsigned int length) {
-  size_t len = min(length, sizeof(msgBuffer) - 1);
-  memcpy(msgBuffer, payload, len);
-  msgBuffer[len] = '\0';
-
-  Serial.print("Comando recebido: ");
-  Serial.println(msgBuffer);
-}
-
-// ===============================
-// MQTT RECONNECT
-// ===============================
-void reconnect() {
-  while (!client.connected()) {
-    Serial.print("Tentando conectar ao MQTT...");
-
-    if (client.connect(mqtt_client_id)) {
-      Serial.println("Conectado!");
-      client.subscribe("esp32/comando/#");
-      client.publish(topic_status, "Online");
-    } else {
-      Serial.print("Falhou, rc=");
-      Serial.println(client.state());
-      delay(2000);
-    }
-  }
-}
-
-// ===============================
-// SETUP
-// ===============================
+// =====================================================================
+//   Setup
+// =====================================================================
 void setup() {
   Serial.begin(115200);
+  pinMode(ledporta, OUTPUT);
+  pinMode(pirporta, INPUT);
   dht.begin();
-
-  pinMode(PIRPIN, INPUT);
-  pinMode(LEDPIN, OUTPUT);
-  digitalWrite(LEDPIN, LOW);
-
-  setup_wifi();
-  client.setServer(mqtt_server, mqtt_port);
-  client.setCallback(callback);
-
-  ultimoMovimento = millis();
 }
 
-// ===============================
-// LOOP PRINCIPAL
-// ===============================
+
+
+// =====================================================================
+//   Loop
+// =====================================================================
 void loop() {
-  if (!client.connected()) reconnect();
-  client.loop();
 
-  unsigned long now = millis();
+  int movimento = digitalRead(pirporta);
+  unsigned long agora = millis();
 
-  // ===============================
-  // LEITURA DHT
-  // ===============================
-  static float lastTemp = NAN;
-  static float lastHum = NAN;
-
-  if (now - lastDHTRead >= DHT_INTERVAL) {
-    lastDHTRead = now;
-
-    float t = dht.readTemperature();
-    float h = dht.readHumidity();
-
-    if (!isnan(t)) {
-      lastTemp = t;
-      snprintf(msgBuffer, sizeof(msgBuffer), "%.2f", t);
-      client.publish(topic_temp, msgBuffer);
-    }
-
-    if (!isnan(h)) {
-      lastHum = h;
-      snprintf(msgBuffer, sizeof(msgBuffer), "%.2f", h);
-      client.publish(topic_hum, msgBuffer);
-    }
-
-    Serial.print("T=");
-    Serial.print(t);
-    Serial.print(" | H=");
-    Serial.println(h);
+  // atualizar tempo de movimento
+  if (movimento) {
+    momentoUltimoMovimento = agora;
   }
 
-  // ===============================
-  // PIR COM DEBOUNCE
-  // ===============================
-  int raw = digitalRead(PIRPIN);
+  static int contador = 0;
+  contador++;
 
-  if (raw != pirStableState) {
-    if (millis() - pirLastChange > PIR_DEBOUNCE_MS) {
-      pirLastChange = millis();
-      pirStableState = raw;
+  // lê sensores a cada 20 ciclos (~2 segundos)
+  if (contador > 20) {
+    float temp = dht.readTemperature();
+    float umid = dht.readHumidity();
+    contador = 0;
 
-      if (pirStableState == HIGH) {
-        Serial.println("Movimento detectado.");
-        client.publish(topic_motion, "DETECTADO");
-        ultimoMovimento = millis();
+    if (!isnan(temp) && !isnan(umid)) {
 
-        // ALERTA DUPLO (movimento + temperatura alta)
-        if (lastTemp > TEMP_MAXIMA) {
-          alertaDuplo = true;
-          digitalWrite(LEDPIN, HIGH);
-          client.publish(topic_alerta_duplo, "ATIVADO");
-        }
+      // deduz fisicamente
+      pareceLigado = deduzirEstadoFisico(temp, umid);
+      bool salaFria = pareceLigado;
+      bool salaQuente = !pareceLigado;
 
-        // Ligar ar se ambiente crítico
-        if (lastTemp >= 30 || lastHum <= 50) {
+      unsigned long tempoSemMovimento = agora - momentoUltimoMovimento;
+
+      // ==========================================================
+      //   LÓGICA DE LIGAR
+      // ==========================================================
+      if (!arLigado) {
+        if (movimento && salaQuente) {
           ligarAr();
         }
-      } else {
-        Serial.println("Movimento finalizado.");
-        client.publish(topic_motion, "FINALIZADO");
-        digitalWrite(LEDPIN, LOW);
-        alertaDuplo = false;
       }
+
+      // ==========================================================
+      //   LÓGICA DE DESLIGAR
+      // ==========================================================
+      else { // arLigado == true
+        if (tempoSemMovimento > TEMPO_DESLIGAR && salaFria) {
+          desligarAr();
+        }
+      }
+
+      // ==========================================================
+      // DEBUG SERIAL
+      // ==========================================================
+      Serial.println("\n--------- SISTEMA ----------");
+
+      Serial.print("Temperatura: ");
+      Serial.print(temp);
+      Serial.println(" C");
+
+      Serial.print("Umidade: ");
+      Serial.print(umid);
+      Serial.println(" %");
+
+      Serial.print("Presença: ");
+      Serial.println(movimento ? "SIM" : "NÃO");
+
+      Serial.print("Estado físico (sensação): ");
+      Serial.println(pareceLigado ? "FRIO (ar parece ligado)" : "QUENTE (ar parece desligado)");
+
+      Serial.print("Estado lógico: ");
+      Serial.println(arLigado ? "AR LIGADO" : "AR DESLIGADO");
+
+      Serial.print("Tempo sem movimento: ");
+      Serial.print(tempoSemMovimento / 1000);
+      Serial.println("s");
+
+      Serial.println("-----------------------------");
     }
   }
 
-  // ===============================
-  // FINALIZAÇÃO DO ALERTA DUPLO
-  // ===============================
-  if (alertaDuplo && lastTemp <= (TEMP_MAXIMA - TEMP_HYSTERESIS)) {
-    alertaDuplo = false;
-    digitalWrite(LEDPIN, LOW);
-    client.publish(topic_status, "ALERTA_TEMP_NORMALIZADA");
-  }
-
-  // ===============================
-  // 1 MINUTO SEM MOVIMENTO → DESLIGA AR
-  // ===============================
-  if (millis() - ultimoMovimento >= SEM_MOVIMENTO_DESLIGA) {
-    desligarAr();
-  }
-
-  delay(10);
+  delay(100);
 }

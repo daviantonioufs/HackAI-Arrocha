@@ -1,62 +1,93 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
-#include <DHT.h> 
-#include <DHT_U.h> 
+#include <DHT.h>
+#include <DHT_U.h>
 
-// ******************************************************
-// --- 1. CONFIGURAÇÕES DE REDE E MQTT ---
-// ******************************************************
-const char* ssid = "Wokwi-GUEST";          // <<<<< SUBSTITUA
-const char* password = "";     // <<<<< SUBSTITUA
+// ===============================
+// CONFIGURAÇÕES REDE / MQTT
+// ===============================
+const char* ssid = "Wokwi-GUEST";
+const char* password = "";
 
-const char* mqtt_server = "test.mosquitto.org"; 
-const int mqtt_port = 1883;                            
-const char* mqtt_client_id = "ESP32_Automação_Final";
+const char* mqtt_server = "broker.hivemq.com";
+const int mqtt_port = 1883;
+const char* mqtt_client_id = "ESP32_Automacao_Final";
 
-// --- TÓPICOS ---
-const char* topic_temp = "esp32/data/temperatura"; 
-const char* topic_hum = "esp32/data/umidade"; 
-const char* topic_motion = "esp32/alerta/movimento"; 
+// Tópicos MQTT
+const char* topic_temp = "esp32/data/temperatura";
+const char* topic_hum = "esp32/data/umidade";
+const char* topic_motion = "esp32/alerta/movimento";
 const char* topic_status = "esp32/status";
-const char* topic_alerta_duplo = "esp32/alerta/risco_temp_movimento"; 
+const char* topic_alerta_duplo = "esp32/alerta/risco_temp_movimento";
 
-// Tópicos de Assinatura (Comandos)
-const char* topic_subscribe_comando = "esp32/comando/#"; 
-const char* topic_comando_alerta = "esp32/comando/acao_alerta"; 
+// ===============================
+// SENSOR / PINOS
+// ===============================
+#define DHTPIN 21
+#define DHTTYPE DHT22
+#define PIRPIN 18
+#define LEDPIN 4
 
-// ******************************************************
-// --- 2. CONFIGURAÇÕES DOS SENSORES E PINOS ---
-// ******************************************************
-#define DHTPIN 4       // Pino GPIO para o DHT22
-#define DHTTYPE DHT22  
-#define PIRPIN 5       // Pino GPIO para o PIR
-#define LEDPIN 2       // Pino GPIO para LED de teste (onboard)
+// Limites
+const float TEMP_MAXIMA = 30.0;
+const float TEMP_HYSTERESIS = 0.8;
+const unsigned long DHT_INTERVAL = 10000UL;
+const unsigned long PIR_DEBOUNCE_MS = 200UL;
+const unsigned long SEM_MOVIMENTO_DESLIGA = 60000UL;  // 1 minuto sem movimento
 
-// --- CONFIGURAÇÕES DE LIMITE ---
-const float TEMP_MAXIMA = 30.0; // Limite de temperatura em Celsius
-
-// ******************************************************
-// --- 3. VARIÁVEIS E OBJETOS ---
-// ******************************************************
+// ===============================
+// OBJETOS / VARIÁVEIS
+// ===============================
 WiFiClient espClient;
 PubSubClient client(espClient);
-DHT dht(DHTPIN, DHTTYPE); 
+DHT dht(DHTPIN, DHTTYPE);
 
-// Variáveis de Controle
-long lastDHTRead = 0;
-const long DHT_INTERVAL = 10000; // Publica DHT a cada 10 segundos
-int pirState = LOW; 
-bool alertaAtivo = false; 
-char msgBuffer[50]; 
+unsigned long lastDHTRead = 0;
+unsigned long ultimoMovimento = 0;
 
-// ******************************************************
-// --- 4. FUNÇÕES DE REDE E MQTT ---
-// ******************************************************
+bool alertaDuplo = false;
+bool arLigado = false;
 
+int pirStableState = LOW;
+unsigned long pirLastChange = 0;
+
+char msgBuffer[64];
+
+// ===============================
+// FUNÇÕES ÚTEIS
+// ===============================
+void piscarLED() {
+  digitalWrite(LEDPIN, HIGH);
+  delay(200);
+  digitalWrite(LEDPIN, LOW);
+  delay(200);
+}
+
+void ligarAr() {
+  if (!arLigado) {
+    piscarLED();
+    arLigado = true;
+    client.publish(topic_status, "AR_LIGADO");
+    Serial.println(">>> AR LIGADO <<<");
+  }
+}
+
+void desligarAr() {
+  if (arLigado) {
+    piscarLED();
+    arLigado = false;
+    client.publish(topic_status, "AR_DESLIGADO");
+    Serial.println(">>> AR DESLIGADO <<<");
+  }
+}
+
+// ===============================
+// WIFI
+// ===============================
 void setup_wifi() {
   delay(10);
   Serial.println();
-  Serial.print("Conectando a ");
+  Serial.print("Conectando ao WiFi: ");
   Serial.println(ssid);
 
   WiFi.begin(ssid, password);
@@ -67,144 +98,148 @@ void setup_wifi() {
   }
 
   Serial.println("\nWiFi conectado!");
-  Serial.print("Endereço IP: ");
+  Serial.print("IP: ");
   Serial.println(WiFi.localIP());
 }
 
+// ===============================
+// MQTT CALLBACK
+// ===============================
+void callback(char* topic, byte* payload, unsigned int length) {
+  size_t len = min(length, sizeof(msgBuffer) - 1);
+  memcpy(msgBuffer, payload, len);
+  msgBuffer[len] = '\0';
+
+  Serial.print("Comando recebido: ");
+  Serial.println(msgBuffer);
+}
+
+// ===============================
+// MQTT RECONNECT
+// ===============================
 void reconnect() {
   while (!client.connected()) {
     Serial.print("Tentando conectar ao MQTT...");
-    if (client.connect(mqtt_client_id)) { 
-      Serial.println("conectado!");
-      
-      client.subscribe(topic_subscribe_comando); 
-      client.subscribe(topic_comando_alerta);    
-      
-      Serial.println("Inscrito nos tópicos de Comando e Ação de Alerta.");
-      client.publish(topic_status, "Online"); 
+
+    if (client.connect(mqtt_client_id)) {
+      Serial.println("Conectado!");
+      client.subscribe("esp32/comando/#");
+      client.publish(topic_status, "Online");
     } else {
-      Serial.print("falhou, rc=");
-      Serial.print(client.state());
-      Serial.println(" tentando novamente em 5 segundos");
-      delay(5000);
+      Serial.print("Falhou, rc=");
+      Serial.println(client.state());
+      delay(2000);
     }
   }
 }
 
-// --- Função de Callback (Receptor de Mensagens) ---
-void callback(char* topic, byte* payload, unsigned int length) {
-  Serial.print(">>> Mensagem recebida no tópico: ");
-  Serial.println(topic);
-
-  String messageTemp;
-  for (int i = 0; i < length; i++) {
-    messageTemp += (char)payload[i];
-  }
-  
-  // 1. Lógica do Alerta Duplo (Resposta do Broker: LIGAR/DESLIGAR LED)
-  if (String(topic) == topic_comando_alerta) {
-    if (messageTemp == "LIGAR_LED_ALERTA") {
-      digitalWrite(LEDPIN, HIGH);
-      Serial.println(">>> ORDEM RECEBIDA: Ligar LED de Alerta!");
-      client.publish(topic_status, "LED_ALERTA_LIGADO_PELO_BROKER");
-    } else if (messageTemp == "DESLIGAR_LED_ALERTA") {
-      digitalWrite(LEDPIN, LOW);
-      Serial.println(">>> ORDEM RECEBIDA: Desligar LED de Alerta.");
-      client.publish(topic_status, "LED_ALERTA_DESLIGADO");
-    }
-  }
-  // 2. Lógica de Comandos Genéricos (LED e Reboot)
-  else if (String(topic) == "esp32/comando/led") {
-    if (messageTemp == "ligar") {
-      digitalWrite(LEDPIN, HIGH);
-      client.publish(topic_status, "LED_Ligado");
-    } else if (messageTemp == "desligar") {
-      digitalWrite(LEDPIN, LOW);
-      client.publish(topic_status, "LED_Desligado");
-    }
-  } 
-  else if (String(topic) == "esp32/comando/reboot") {
-    Serial.println(">>> Comando de Reboot recebido. Reiniciando...");
-    client.publish(topic_status, "Reiniciando");
-    delay(100); 
-    ESP.restart();
-  }
-}
-
-// ******************************************************
-// --- 5. SETUP E LOOP (Funções Principais) ---
-// ******************************************************
-
+// ===============================
+// SETUP
+// ===============================
 void setup() {
   Serial.begin(115200);
-
-  // Inicialização de Pinos e Sensores
   dht.begin();
+
   pinMode(PIRPIN, INPUT);
   pinMode(LEDPIN, OUTPUT);
-  digitalWrite(LEDPIN, LOW); 
+  digitalWrite(LEDPIN, LOW);
 
-  // Inicialização de Rede e MQTT
   setup_wifi();
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
+
+  ultimoMovimento = millis();
 }
 
+// ===============================
+// LOOP PRINCIPAL
+// ===============================
 void loop() {
-  // 1. Manter Conexão MQTT
-  if (!client.connected()) {
-    reconnect();
-  }
-  client.loop(); // *Ouvinte ativo para receber comandos*
+  if (!client.connected()) reconnect();
+  client.loop();
 
-  // --- Lógica de Publicação dos Sensores ---
-  long now = millis();
-  
-  // Leitura das variáveis DHT (assumindo que já foram lidas ou serão lidas agora)
-  float t = dht.readTemperature();
-  float h = dht.readHumidity();
+  unsigned long now = millis();
 
-  // 2. Publicação Temporizada do DHT
-  if (now - lastDHTRead >= DHT_INTERVAL) { 
+  // ===============================
+  // LEITURA DHT
+  // ===============================
+  static float lastTemp = NAN;
+  static float lastHum = NAN;
+
+  if (now - lastDHTRead >= DHT_INTERVAL) {
     lastDHTRead = now;
-    
-    if (isnan(h) || isnan(t)) {
-      client.publish(topic_status, "Erro_DHT");
-    } else {
+
+    float t = dht.readTemperature();
+    float h = dht.readHumidity();
+
+    if (!isnan(t)) {
+      lastTemp = t;
       snprintf(msgBuffer, sizeof(msgBuffer), "%.2f", t);
       client.publish(topic_temp, msgBuffer);
+    }
+
+    if (!isnan(h)) {
+      lastHum = h;
       snprintf(msgBuffer, sizeof(msgBuffer), "%.2f", h);
       client.publish(topic_hum, msgBuffer);
     }
+
+    Serial.print("T=");
+    Serial.print(t);
+    Serial.print(" | H=");
+    Serial.println(h);
   }
 
-  // 3. Lógica de Alerta Duplo (PIR + Temperatura)
-  int val = digitalRead(PIRPIN);
-  
-  if (val == HIGH) { // Movimento detectado
-    if (pirState == LOW) {
-      pirState = HIGH; 
-      
-      // >>> VERIFICAÇÃO DE ALERTA DUPLO <<<
-      if (t > TEMP_MAXIMA && alertaAtivo == false) {
-          Serial.println(">>> ALERTA DUPLO DISPARADO! Enviando Risco ao Broker.");
-          
-          snprintf(msgBuffer, sizeof(msgBuffer), "RISCO_TEMP_MOVIMENTO_T:%.1f", t);
-          client.publish(topic_alerta_duplo, msgBuffer); // Envia o alerta
-          
-          alertaAtivo = true; // Impede envio repetido
+  // ===============================
+  // PIR COM DEBOUNCE
+  // ===============================
+  int raw = digitalRead(PIRPIN);
+
+  if (raw != pirStableState) {
+    if (millis() - pirLastChange > PIR_DEBOUNCE_MS) {
+      pirLastChange = millis();
+      pirStableState = raw;
+
+      if (pirStableState == HIGH) {
+        Serial.println("Movimento detectado.");
+        client.publish(topic_motion, "DETECTADO");
+        ultimoMovimento = millis();
+
+        // ALERTA DUPLO (movimento + temperatura alta)
+        if (lastTemp > TEMP_MAXIMA) {
+          alertaDuplo = true;
+          digitalWrite(LEDPIN, HIGH);
+          client.publish(topic_alerta_duplo, "ATIVADO");
+        }
+
+        // Ligar ar se ambiente crítico
+        if (lastTemp >= 30 || lastHum <= 50) {
+          ligarAr();
+        }
       } else {
-          client.publish(topic_motion, "DETECTADO");
+        Serial.println("Movimento finalizado.");
+        client.publish(topic_motion, "FINALIZADO");
+        digitalWrite(LEDPIN, LOW);
+        alertaDuplo = false;
       }
     }
-  } else { // Sem Movimento
-    if (pirState == HIGH) {
-      pirState = LOW; 
-      alertaAtivo = false; // Reseta o flag
-      
-      client.publish(topic_motion, "FINALIZADO");
-    }
   }
 
-  delay(10); 
+  // ===============================
+  // FINALIZAÇÃO DO ALERTA DUPLO
+  // ===============================
+  if (alertaDuplo && lastTemp <= (TEMP_MAXIMA - TEMP_HYSTERESIS)) {
+    alertaDuplo = false;
+    digitalWrite(LEDPIN, LOW);
+    client.publish(topic_status, "ALERTA_TEMP_NORMALIZADA");
+  }
+
+  // ===============================
+  // 1 MINUTO SEM MOVIMENTO → DESLIGA AR
+  // ===============================
+  if (millis() - ultimoMovimento >= SEM_MOVIMENTO_DESLIGA) {
+    desligarAr();
+  }
+
+  delay(10);
 }

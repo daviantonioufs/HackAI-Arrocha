@@ -30,6 +30,8 @@ O **Mangaba AI** é um sistema híbrido que desacopla a leitura de sensores da t
 
 Neste MVP, simulamos o ambiente físico na nuvem enquanto o processamento neural ocorre localmente.
 
+SIMULAÇÃO DO SISTEMA ESP INDIVIDUAL: https://wokwi.com/projects/448582533073649665
+
 ```mermaid
 graph LR
     subgraph Wokwi Cloud

@@ -3,9 +3,9 @@
 // ---------------------------------------------------------------------
 // PINOS
 // ---------------------------------------------------------------------
-int ledporta = 25;    // LED que envia o sinal para o ar-condicionado
-int pirporta = 22;    // Sensor PIR
-int dhtporta = 4;     // DHT22
+int ledporta = 25;
+int pirporta = 22;
+int dhtporta = 4;
 
 // ---------------------------------------------------------------------
 // ESTADOS
@@ -13,7 +13,8 @@ int dhtporta = 4;     // DHT22
 bool arLigado = false;       // Estado real do ar
 bool pareceLigado = false;   // Deduções pela temperatura/umidade
 
-unsigned long momentoUltimoMovimento = 0;
+unsigned long momentoUltimoMovimento = 0;  
+unsigned long tempoSemMovimento = 0;       
 
 #define DHTTYPE DHT22
 DHT dht(dhtporta, DHTTYPE);
@@ -23,32 +24,26 @@ const unsigned long TEMPO_DESLIGAR = 60000;
 
 
 // =====================================================================
-//   IA (APENAS COMENTÁRIOS — NÃO ALTERA O CÓDIGO)
+// IA (somente documentada)
 // =====================================================================
 /*
-    A IA observaria:
-        temperatura, umidade, movimento,
-        arLigado, pareceLigado, tempoSemMovimento
+    A IA teria entradas:
+      [temperatura, umidade, movimento, arLigado,
+       pareceLigado, tempoSemMovimento]
 
     E retornaria:
-        [0] prob_ar_ligado
-        [1] prob_deveria_ligar
-        [2] prob_erro_termico
+      prob_ar_ligado
+      prob_deveria_ligar
+      prob_erro_termico
 
-    Exemplo de consulta (não ativo agora):
-        float entrada[6] = {...};
-        float saida[3];
-        ml.predict(entrada, saida);
-
-        if (!arLigado && saida[1] > 0.8) ligarAr();
-        if (saida[2] > 0.7) alertaErro();
+    EXEMPLO (não usado agora):
+        ml.predict(input, output);
 */
 // =====================================================================
 
 
-
 // =====================================================================
-//   Deduz se a sala está fria (ou seja, ar "parece" ligado)
+// Deduz estado térmico
 // =====================================================================
 bool deduzirEstadoFisico(float temp, float umid) {
   float limiteTemp = 24.0;
@@ -60,7 +55,7 @@ bool deduzirEstadoFisico(float temp, float umid) {
 
 
 // =====================================================================
-//   Sinal enviado ao ar (pisca o LED)
+// LED -> sinal IR universal
 // =====================================================================
 void enviarSinal() {
   digitalWrite(ledporta, HIGH);
@@ -71,11 +66,14 @@ void enviarSinal() {
 
 
 // =====================================================================
-//   Ligar e desligar o ar
+// Liga e desliga
 // =====================================================================
 void ligarAr() {
   if (!arLigado) {
     arLigado = true;
+    momentoUltimoMovimento = millis(); // zera contagem ao ligar
+    tempoSemMovimento = 0;
+
     enviarSinal();
     Serial.println("[AR] LIGADO ✔ (Presença + Sala quente)");
   }
@@ -84,6 +82,8 @@ void ligarAr() {
 void desligarAr() {
   if (arLigado) {
     arLigado = false;
+    tempoSemMovimento = 0; // zera ao desligar
+
     enviarSinal();
     Serial.println("[AR] DESLIGADO ✔ (1 min sem movimento + Sala fria)");
   }
@@ -92,7 +92,7 @@ void desligarAr() {
 
 
 // =====================================================================
-//   Setup
+// Setup
 // =====================================================================
 void setup() {
   Serial.begin(115200);
@@ -104,57 +104,68 @@ void setup() {
 
 
 // =====================================================================
-//   Loop
+// Loop principal
 // =====================================================================
 void loop() {
 
   int movimento = digitalRead(pirporta);
   unsigned long agora = millis();
 
-  // atualizar tempo de movimento
-  if (movimento) {
-    momentoUltimoMovimento = agora;
-  }
-
   static int contador = 0;
   contador++;
 
-  // lê sensores a cada 20 ciclos (~2 segundos)
+  // leitura do DHT a cada ~2 segundos
   if (contador > 20) {
+
     float temp = dht.readTemperature();
     float umid = dht.readHumidity();
     contador = 0;
 
     if (!isnan(temp) && !isnan(umid)) {
 
-      // deduz fisicamente
       pareceLigado = deduzirEstadoFisico(temp, umid);
       bool salaFria = pareceLigado;
       bool salaQuente = !pareceLigado;
 
-      unsigned long tempoSemMovimento = agora - momentoUltimoMovimento;
+      // =======================================================
+      //  CONTAGEM DE TEMPO SEM MOVIMENTO
+      //  (somente quando o AR está ligado)
+      // =======================================================
+      if (arLigado) {
 
-      // ==========================================================
-      //   LÓGICA DE LIGAR
-      // ==========================================================
+        if (movimento) {
+          momentoUltimoMovimento = agora;  // reseta quando detecta movimento
+        }
+
+        tempoSemMovimento = agora - momentoUltimoMovimento;
+      } 
+      else {
+        tempoSemMovimento = 0;             // ZERA quando o ar está desligado
+      }
+
+
+      // =======================================================
+      //  LIGAMENTO
+      // =======================================================
       if (!arLigado) {
         if (movimento && salaQuente) {
           ligarAr();
         }
       }
 
-      // ==========================================================
-      //   LÓGICA DE DESLIGAR
-      // ==========================================================
-      else { // arLigado == true
+      // =======================================================
+      //  DESLIGAMENTO
+      // =======================================================
+      if (arLigado) {
         if (tempoSemMovimento > TEMPO_DESLIGAR && salaFria) {
           desligarAr();
         }
       }
 
-      // ==========================================================
-      // DEBUG SERIAL
-      // ==========================================================
+
+      // =======================================================
+      // Serial debug
+      // =======================================================
       Serial.println("\n--------- SISTEMA ----------");
 
       Serial.print("Temperatura: ");
@@ -168,8 +179,8 @@ void loop() {
       Serial.print("Presença: ");
       Serial.println(movimento ? "SIM" : "NÃO");
 
-      Serial.print("Estado físico (sensação): ");
-      Serial.println(pareceLigado ? "FRIO (ar parece ligado)" : "QUENTE (ar parece desligado)");
+      Serial.print("Estado físico: ");
+      Serial.println(pareceLigado ? "FRIO (parece ligado)" : "QUENTE (parece desligado)");
 
       Serial.print("Estado lógico: ");
       Serial.println(arLigado ? "AR LIGADO" : "AR DESLIGADO");

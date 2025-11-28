@@ -25,7 +25,7 @@ Para demonstrar a captura de dados em tempo real, utilizamos uma simulação de 
   * **Sensores:** DHT22 (Temperatura/Umidade) e PIR (Sensor de Presença).
   * **Atuadores:** Display OLED (Feedback visual local das decisões da IA) e LED (Status de operação).
   * **Conectividade:** O dispositivo envia telemetria via HTTP para nosso Backend Python, que processa os desejos do usuário.
-  * Simuladro fundionando:  https://wokwi.com/projects/448582533073649665
+  * **Simulador fundionando:**  https://wokwi.com/projects/448582533073649665
 
 > *Nota: Durante a apresentação, demonstramos a comunicação ativa entre este simulador e nosso cérebro de IA.*
 
